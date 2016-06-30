@@ -5,16 +5,13 @@ __all__ = ('HostConf', 'ProjectConf', 'VirtualenvConf', 'LocalConf', 'ReleaseLog
 
 import os
 from distutils.version import LooseVersion
-from functools import wraps
 
 import datetime
-from os import rmdir, listdir
-from shutil import move, copy
-from tempfile import mkdtemp
+from shutil import copy
 
 import fabric, fabric.utils
-from fabric.context_managers import cd, lcd, shell_env
-from fabric.operations import local, put, prompt, warn
+from fabric.context_managers import cd, shell_env
+from fabric.operations import put, prompt, warn
 # noinspection PyCompatibility
 from typing import NamedTuple, List, Dict, Iterable, Optional, Callable, Tuple
 from os.path import basename
@@ -133,24 +130,6 @@ def _lines_to_requirements(lines):
     return dict((x[0], LooseVersion(x[1]) if len(x)==2 else None) for x in pkgs)
 
 
-def run(cmd, *args, **kwargs):
-    """
-    Unified command execution - calls fabric's local(), run() or sudo operation() as required.
-    Sets shell_escape to False - this is necessary to support remotes with a csh on login.
-    :param cmd: the command to execute
-    """
-    from fabric.state import env
-    from fabric.operations import run, sudo, local
-    if env.get("host_string").endswith('@localhost'):
-        return local(cmd, capture=True)
-    # this is necessary to work with csh on login
-    cmd = "\"'%s'\"" % cmd
-    if env.get("sudo_user") in (None, env.get("user")):
-        return run(cmd, *args, shell_escape=False, **kwargs)
-    else:
-        return sudo(cmd, *args, shell_escape=False, **kwargs)
-
-
 class ProjectConf(object):
     """
     Configuration of a django project
@@ -225,7 +204,7 @@ class VirtualenvConf(object):
         :return: Returns a dict of package names to version numbers (as LooseVersion)
         """
         with self.settings():
-            lines = run('%s freeze' % self.pip, quiet=True).split('\n')
+            lines = self.run('%s freeze' % self.pip, quiet=True).split('\n')
             return _lines_to_requirements(lines)
 
     def get_pkgs_to_install(self, release_log, pyversion):
@@ -255,7 +234,7 @@ class VirtualenvConf(object):
         Returns the Python Platform  of this virtualenv (actually, only python version)
         """
         with self.settings():
-            r = run("%s --version" % self.python, pty=False, quiet=True)
+            r = self.run("%s --version" % self.python, pty=False, quiet=True)
             out = r.stdout + r.stderr
             interpreter, version = out.split(" ", 2)
             v = version.split('.')
@@ -287,6 +266,25 @@ class VirtualenvConf(object):
             print("settings sudo_user:", self.vpy_user)
         defaults.update(kwargs)
         return fabric.context_managers.settings(*args, **defaults)
+
+    @classmethod
+    def run(cls, cmd, *args, **kwargs):
+        """
+        Unified command execution - calls fabric's local(), run() or sudo operation() as required.
+        Sets shell_escape to False - this is necessary to support remotes with a csh on login.
+        Caller needs to set env via settings().
+        :param cmd: the command to execute
+        """
+        from fabric.state import env
+        from fabric.operations import run, sudo, local
+        if env.get("host_string").endswith('@localhost'):
+            return local(cmd, capture=True)
+        # this is necessary to work with csh on login
+        cmd = "\"'%s'\"" % cmd
+        if env.get("sudo_user") in (None, env.get("user")):
+            return run(cmd, *args, shell_escape=False, **kwargs)
+        else:
+            return sudo(cmd, *args, shell_escape=False, **kwargs)
 
     def match(self, query):
         """
@@ -336,15 +334,13 @@ class HostConf(object):
     def __unicode__(self):
         return self.hostname
 
-
     def reload_webservices(self, vpys):
         # type: (List[VirtualEnvConf]) -> None
         if self.reload_once:
             vpys = vpys[:1]
         for vpy in vpys:
             with vpy.settings():
-                run(self.reload_cmd(vpy))
-
+                vpy.run(self.reload_cmd(vpy))
 
 # noinspection PyMethodMayBeStatic,PyMethodMayBeStatic
 class LocalConf(object):
@@ -366,33 +362,6 @@ class LocalConf(object):
         Path to a local pip
         """
         return os.path.join(self.vpy_path, 'bin/pip')
-
-    def get_project_dir(self, path):
-        # type: (unicode) -> unicode, unicode
-        """
-        returns the toplevel directory and the module name for the sources that contain the given path
-        """
-        if path.endswith('/'):
-            path = path[:-1]
-        module_name = basename(path)
-        if module_name.startswith('artur.'):
-            path +='/artur'
-        return path
-
-    def from_pycharm(self):
-        """
-        decorator to wrap a task called from pycharm
-
-        In pycharm, use $FileDir$,$FileDirRelativeToProjectRoot$ as first parameters
-        In wrapped function, use projectpath as first parameter.
-        """
-        def wraps_method(fn):
-            @wraps(fn)
-            def wrapper(filepath, relpath, *args, **kwargs):
-                # type (unicode, unicode, *Any, **Any) -> (unicode, unicode, *Any, *Any) -> Any
-                return fn(self.get_project_dir(self._get_project_path(filepath, relpath)), *args, **kwargs)
-            return wrapper
-        return wraps_method
 
     def task_deploy(self, vpy_names=""):
         # type: (unicode) -> None
@@ -419,7 +388,7 @@ class LocalConf(object):
                     if confirm.lower() not in ('j', 'y'):
                         raise Skip()
                     updated_vpys.add(vpy)
-                    r = run('mkdir -p %s' % vpy.wheels)
+                    r = vpy.run('mkdir -p %s' % vpy.wheels)
                     if not r.succeeded:
                         self.release_log.abort(vpy, 'cannot create wheel directory')
                     for i, wheel in enumerate(to_install):
@@ -432,7 +401,7 @@ class LocalConf(object):
                                     use_sudo=vpy.ssh_user != vpy.vpy_user)
                             if not r.succeeded:
                                 self.release_log.abort(vpy, 'could not put %s' % wheel)
-                        r = run("%s install --upgrade %s" % (vpy.pip, remote_path))
+                        r = vpy.run("%s install --upgrade %s" % (vpy.pip, remote_path))
                         if not r.succeeded:
                             self.release_log.abort(vpy, 'could not install %s after installing %s' % (
                             wheel, ", ".join(p.wheel for p in to_install[:i])))
@@ -440,7 +409,7 @@ class LocalConf(object):
                     for proj in vpy.projects:
                         if proj.migrate:
                             with proj.settings():
-                                r = run("%s migrate $DJANGO_SETTINGS_MODULE" % os.path.join(vpy.vpy_path, "bin",
+                                r = vpy.run("%s migrate $DJANGO_SETTINGS_MODULE" % os.path.join(vpy.vpy_path, "bin",
                                                                                             "django_admin.py"))
                                 if not r.succeeded:
                                     self.release_log.log_error(vpy,
