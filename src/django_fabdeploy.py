@@ -164,6 +164,9 @@ class VirtualenvConf(object):
     Configuration of a virtual python environment.
     One VirtualenvConf can hold multiple ProjectConfs.
     """
+    # default_env is a dict of default settings.
+    default_env = {}
+
     def __init__(self, ssh_user, vpy_path, vpy_user, requirements, site_packages, projects):
         # type: (Optional[unicode], unicode, Optional[unicode], Dict[unicode, LooseVersion], List[unicode], List[ProjectConf]) -> None
         self.vpy_path = vpy_path
@@ -257,9 +260,8 @@ class VirtualenvConf(object):
         :param kwargs: see fabric
         """
         defaults = dict(host_string="%s@%s" % (self.ssh_user, self.host.hostname),
-                        use_ssh_config=True,
-                        connection_attempts=3,
                         shell='/bin/bash -c')
+        defaults.update(self.default_env)
         # TODO: use_ssh_config and connection_attempts should be moved to the caller.
         if self.vpy_user != self.ssh_user:
             defaults["sudo_user"] = self.vpy_user
