@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import, unicode_literals, print_function, division
+
+from itertools import chain
+
 __all__ = ('HostConf', 'ProjectConf', 'VirtualenvConf', 'LocalConf', 'ReleaseLog', 'read_requirements')
 
 import os
@@ -13,7 +16,7 @@ import fabric, fabric.utils
 from fabric.context_managers import cd, shell_env
 from fabric.operations import put, prompt, warn
 # noinspection PyCompatibility
-from typing import NamedTuple, List, Dict, Iterable, Optional, Callable, Tuple
+from typing import NamedTuple, List, Dict, Iterable, Optional, Callable, Tuple, Iterator
 from os.path import basename
 
 
@@ -136,6 +139,11 @@ class ProjectConf(object):
     """
     def __init__(self, settings_module, user, migrate=True):
         # type: (unicode, Optional[unicode], bool) -> None
+        """
+        :param settings_module: What to set into $DJANGO_SETTINGS_MODUL
+        :param user: Which user to use for running database migrations
+        :param migrate: Whether to run database migrations after changes to the virtualenv
+        """
         self.settings_module = settings_module
         self.user = user
         # self.vpy will be set by VirtualenvConf.__init__()
@@ -167,14 +175,22 @@ class VirtualenvConf(object):
     # default_env is a dict of default settings.
     default_env = {}
 
-    def __init__(self, ssh_user, vpy_path, vpy_user, requirements, site_packages, projects):
+    def __init__(self, ssh_user, vpy_path, vpy_user, requirements, custom_packages, projects):
         # type: (Optional[unicode], unicode, Optional[unicode], Dict[unicode, LooseVersion], List[unicode], List[ProjectConf]) -> None
+        """
+        :param ssh_user: Which user to use for connecting by ssh
+        :param vpy_path: Path to the virtualenv home
+        :param vpy_user: Which user to use for modifying the virtualenv files
+        :param requirements: dict of requirements; use read_requirements to read a requirement file.
+        :param custom_packages: list of packages needed only in this virtualenv
+        :param projects: list of ProjectConf that use this virtualenv
+        """
         self.vpy_path = vpy_path
         self.vpy_user = vpy_user
         self.ssh_user = ssh_user
         self.requirements = requirements
         self.projects = projects
-        self.site_packages = site_packages
+        self.custom_packages = custom_packages
         # self.host will be set by HostConf.__init__()
         self.host = None  # type: HostConf
         for p in projects:
@@ -219,7 +235,7 @@ class VirtualenvConf(object):
         """
         installed = self.get_installed_pkgs()
         installable = ((pkg, release_log.get_latest(pkg), installed.get(pkg))
-                       for pkg in (self.requirements.keys() + self.site_packages))
+                       for pkg in (self.requirements.keys() + self.custom_packages))
         installable = [(pkg, spec, spec.get_wheel(pyversion) if spec is not None else None, version)
                        for pkg, spec, version in installable]
         return ToInstallResult(
@@ -324,7 +340,7 @@ class HostConf(object):
         :param hostname: like used for calling ssh. Use 'localhost' for local virtualenvs
         :param reload_cmd: called after deployment. Could also be a command to start unit tests ...
         :param reload_once: call reload_cmd only once for all virtualenvs?
-        :param vpys:
+        :param vpys: list of all VirtualenvConfs inside this host.
         """
         self.hostname = hostname
         self.reload_cmd = reload_cmd
@@ -349,29 +365,33 @@ class LocalConf(object):
     """
     hooks and helpers for your local configuration
     """
-    def __init__(self, workspace, wheels, vpy_path, release_log, all_vpys):
-        # type: (unicode, unicode, unicode, ReleaseLog, List[VirtualenvConf) -> None
-        self.workspace = workspace
+    def __init__(self, wheels, release_log, hosts):
+        # type: (unicode, ReleaseLog, List[HostConf) -> None
+        """
+        :param wheels: path to the directory holding all the wheel files
+        :param release_log: The ReleaseLog object
+        :param hosts: List of all HostConfs
+        """
         self.wheels = wheels
-        self.vpy_path = vpy_path
         self.release_log = release_log
-        self.all_vpys = all_vpys
+        self.hosts = hosts
 
-    @property
-    def pip(self):
-        # type: () -> unicode
+    def vpys(self, query=""):
+        # type: (unicode) -> Iterator[VirtualenvConf]
         """
-        Path to a local pip
+        Returns all vpys that match the query; see VirtualenvConf.match for query types.
+        :param query:
+        :return:
         """
-        return os.path.join(self.vpy_path, 'bin/pip')
+        return (v for v in chain(*(h.vpys for h in self.hosts))
+                if v.match(query)
+               )
 
-    def task_deploy(self, vpy_names=""):
+    def task_deploy(self, query=""):
         # type: (unicode) -> None
-        vpy_name_list = vpy_names.split(",")
-        vpys = [v for v in self.all_vpys if any(v.match(vpy_name) for vpy_name in vpy_name_list)]
         updated_vpys = set()
 
-        for vpy in vpys:
+        for vpy in self.vpys(query):
             try:
                 print("\nUpdating %s" % unicode(vpy))
                 with vpy.settings(remote_interrupt=True):
@@ -424,7 +444,7 @@ class LocalConf(object):
                 pass
             for host in set(vpy.host for vpy in updated_vpys):
                 with vpy.settings():
-                    host.reload_webservices([v for v in vpys if v.host == host])
+                    host.reload_webservices([v for v in host.vpys if v in updated_vpys])
 
     def task_add_wheel(self, *pathnames):
         # type: (*unicode) -> None
