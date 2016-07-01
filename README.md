@@ -1,6 +1,7 @@
 This project provides tools for systematic deployment for django projects 
 in virtual environments. It depends on Fabric as underlying framework, 
-ssh to connect to the hosts and pip to install and manage the packages.
+ssh to connect to the hosts, wheels as package format, and pip to install 
+and manage the packages.
 
 The managing environment needs python 2.7, Fabric, paramiko, pip and 
 typing. 
