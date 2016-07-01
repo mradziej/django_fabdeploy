@@ -393,20 +393,20 @@ class LocalConf(object):
 
         for vpy in self.vpys(query):
             try:
-                print("\nUpdating %s" % unicode(vpy))
+                print("\nDeploying to %s" % unicode(vpy))
                 with vpy.settings(remote_interrupt=True):
                     pyversion = vpy.get_py_version()
                     to_install, missing, ahead = vpy.get_pkgs_to_install(self.release_log, pyversion)
-                    print("Zu installieren: %s" % ", ".join(unicode(p) for p in to_install))
+                    print("To install: %s" % ", ".join(unicode(p) for p in to_install))
                     if ahead:
                         warn('Packages ahead of repository: %s' % ', '.join(unicode(s) for s in ahead))
                     if missing:
                         warn('skipping %s: missing packages: %s' % (vpy, (", ".join(missing))))
                         raise Skip()
                     if not to_install:
-                        print("Nichts zu installieren.")
+                        print("Nothing to install.")
                         raise Skip()
-                    confirm = prompt('update? [j/n]')
+                    confirm = prompt('deploy? [y/n]')
                     if confirm.lower() not in ('j', 'y'):
                         raise Skip()
                     updated_vpys.add(vpy)
