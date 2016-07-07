@@ -289,7 +289,6 @@ class VirtualenvConf(object):
     def run(cls, cmd, *args, **kwargs):
         """
         Unified command execution - calls fabric's local(), run() or sudo operation() as required.
-        Sets shell_escape to False - this is necessary to support remotes with a csh on login.
         Caller needs to set env via settings().
         :param cmd: the command to execute
         """
@@ -297,12 +296,10 @@ class VirtualenvConf(object):
         from fabric.operations import run, sudo, local
         if env.get("host_string").endswith('@localhost'):
             return local(cmd, capture=True)
-        # this is necessary to work with csh on login
-        cmd = "\"'%s'\"" % cmd
         if env.get("sudo_user") in (None, env.get("user")):
-            return run(cmd, *args, shell_escape=False, **kwargs)
+            return run(cmd, *args, **kwargs)
         else:
-            return sudo(cmd, *args, shell_escape=False, **kwargs)
+            return sudo(cmd, *args, **kwargs)
 
     def match(self, query):
         """
