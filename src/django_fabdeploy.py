@@ -428,8 +428,9 @@ class LocalConf(object):
                     for proj in vpy.projects:
                         if proj.migrate:
                             with proj.settings():
-                                r = vpy.run("%s migrate $DJANGO_SETTINGS_MODULE" % os.path.join(vpy.vpy_path, "bin",
-                                                                                            "django_admin.py"))
+                                r = vpy.run(
+                                    "%s migrate" % os.path.join(
+                                        vpy.vpy_path, "bin", "django-admin.py"))
                                 if not r.succeeded:
                                     self.release_log.log_error(vpy,
                                                                     'could not migrate in %s after installing %s' % (
